@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -145,8 +146,14 @@ class AdminPanel:
         try:
             chat_id = int(message.text.strip())
         except ValueError:
-            await message.answer('chat_id должен быть числом.')
+            await message.answer('Некорректный chat_id. Отправьте числовой chat_id еще раз.')
             return
+
+        donor = await self.db.fetchone('SELECT chat_id FROM donors WHERE chat_id = ?', (chat_id,))
+        if not donor:
+            await message.answer('Донор с таким chat_id не найден. Отправьте chat_id еще раз.')
+            return
+
         await self.db.remove_donor(chat_id)
         await state.clear()
         await message.answer('Донор удален.', reply_markup=await self._main_keyboard())
@@ -176,8 +183,13 @@ class AdminPanel:
         await callback.message.answer_document(FSInputFile(Path(path)))
 
     async def status(self, callback: CallbackQuery) -> None:
-        await callback.message.edit_text(await self._dashboard_text(), reply_markup=await self._main_keyboard())
-        await callback.answer()
+        try:
+            await callback.message.edit_text(await self._dashboard_text(), reply_markup=await self._main_keyboard())
+        except TelegramBadRequest as error:
+            if 'message is not modified' not in str(error).lower():
+                raise
+        finally:
+            await callback.answer()
 
     async def _dashboard_text(self) -> str:
         depth = await self.db.get_depth_days()
