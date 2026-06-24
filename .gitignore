@@ -4,3 +4,5 @@ __pycache__/
 data/
 exports/
 exports_test/
+
+venv/
