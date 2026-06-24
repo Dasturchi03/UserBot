@@ -6,3 +6,5 @@ exports/
 exports_test/
 
 venv/
+nohup.out
+data1/
