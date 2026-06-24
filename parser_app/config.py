@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 ADMIN_IDS = [
     1030165038,
+    290757505
 ]
 
 
