@@ -5,6 +5,7 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus, ChatType
@@ -79,8 +80,9 @@ class UserbotParser:
         target = link.strip()
         if not target:
             raise ValueError('Ссылка на донора пустая.')
+        chat_ref = _normalize_chat_ref(target)
         try:
-            chat = await self.client.join_chat(target) if _looks_like_invite(target) else await self.client.get_chat(target)
+            chat = await self.client.join_chat(chat_ref) if _looks_like_invite(chat_ref) else await self.client.get_chat(chat_ref)
         except InviteRequestSent:
             await self.db.add_pending_donor(target)
             return 'Заявка на вступление отправлена. Донор сохранен в статусе ожидания одобрения.'
@@ -204,6 +206,24 @@ class UserbotParser:
 
 def _looks_like_invite(value: str) -> bool:
     return 't.me/+' in value or 'joinchat/' in value
+
+
+def _normalize_chat_ref(value: str) -> str:
+    target = value.strip()
+    if not target:
+        return target
+    if _looks_like_invite(target):
+        return target
+    if target.startswith('@'):
+        return target
+    if '://' not in target and target.startswith('t.me/'):
+        target = f'https://{target}'
+    parsed = urlparse(target)
+    if parsed.netloc in {'t.me', 'telegram.me'}:
+        username = parsed.path.strip('/').split('/', 1)[0]
+        if username:
+            return f'@{username}'
+    return target
 
 
 def _looks_like_proxy_error(error: BaseException) -> bool:
