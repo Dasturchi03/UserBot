@@ -7,7 +7,7 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from parser_app.admin_bot import AdminPanel
-from parser_app.config import ProxyConfigError, load_config
+from parser_app.config import ADMIN_IDS, ProxyConfigError, load_config
 from parser_app.db import Database
 from parser_app.userbot import ProxyUnavailableError, UserbotParser
 
@@ -60,17 +60,20 @@ async def main() -> None:
 
 async def _notify_admin_from_env(error: BaseException) -> None:
     token = os.getenv('BOT_TOKEN', '').strip()
-    admin_id = os.getenv('ADMIN_ID', '').strip()
-    if not token or not admin_id:
+    if not token or not ADMIN_IDS:
         return
     bot = Bot(token)
     try:
-        await bot.send_message(
-            int(admin_id),
-            'Прокси обязателен, но он не настроен корректно.\n'
-            'Юзербот не запущен. Проверьте PROXY/Прокси.txt и перезапустите проект.\n\n'
-            f'Ошибка: {error}',
-        )
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    'Прокси обязателен, но он не настроен корректно.\n'
+                    'Юзербот не запущен. Проверьте PROXY/Прокси.txt и перезапустите проект.\n\n'
+                    f'Ошибка: {error}',
+                )
+            except Exception:
+                log.exception('Не удалось отправить сообщение админу %s', admin_id)
     finally:
         await bot.session.close()
 

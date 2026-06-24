@@ -45,8 +45,8 @@ class AdminPanel:
         await self.bot.session.close()
 
     def _register(self) -> None:
-        self.router.message.filter(F.from_user.id == self.config.admin_id)
-        self.router.callback_query.filter(F.from_user.id == self.config.admin_id)
+        self.router.message.filter(F.from_user.id.in_(self.config.admin_ids))
+        self.router.callback_query.filter(F.from_user.id.in_(self.config.admin_ids))
         self.router.message(CommandStart())(self.start)
         self.router.message(Command('menu'))(self.start)
         self.router.callback_query(F.data == 'menu')(self.menu_callback)
@@ -192,7 +192,7 @@ class AdminPanel:
         except ProxyUnavailableError as error:
             await self.notify_proxy_error(error)
             return
-        await self.bot.send_message(self.config.admin_id, f'Автопарсинг завершен: {result}')
+        await self.send_to_admins(f'Автопарсинг завершен: {result}')
 
     async def notify_proxy_error(self, error: BaseException) -> None:
         message = (
@@ -202,12 +202,18 @@ class AdminPanel:
         log.error(message)
         print(message, file=sys.stderr)
         await self.parser.stop()
-        await self.bot.send_message(
-            self.config.admin_id,
+        await self.send_to_admins(
             'Прокси не работает или Telegram не подключается через него.\n'
             'Юзербот остановил работу. Проверьте PROXY/Прокси.txt и перезапустите проект.\n\n'
             f'Ошибка: {error}',
         )
+
+    async def send_to_admins(self, text: str) -> None:
+        for admin_id in self.config.admin_ids:
+            try:
+                await self.bot.send_message(admin_id, text)
+            except Exception:
+                log.exception('Не удалось отправить сообщение админу %s', admin_id)
 
     async def export_new(self, callback: CallbackQuery) -> None:
         await self._send_export(callback, only_new=True)

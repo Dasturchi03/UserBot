@@ -10,10 +10,15 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 
+ADMIN_IDS = [
+    1030165038,
+]
+
+
 @dataclass(frozen=True)
 class Config:
     bot_token: str
-    admin_id: int
+    admin_ids: tuple[int, ...]
     api_id: int
     api_hash: str
     session_name: str
@@ -45,11 +50,10 @@ def load_config() -> Config:
         raise RuntimeError('API_ID/API_HASH не найдены. Укажите их в .env или в JSON аккаунта.')
 
     bot_token = os.getenv('BOT_TOKEN', '').strip()
-    admin_id = _int_env('ADMIN_ID')
     if not bot_token:
         raise RuntimeError('BOT_TOKEN должен быть указан в .env.')
-    if not admin_id:
-        raise RuntimeError('ADMIN_ID должен быть указан в .env.')
+    if not ADMIN_IDS:
+        raise RuntimeError('ADMIN_IDS должен содержать хотя бы один Telegram ID администратора.')
 
     session_name = os.getenv('SESSION_NAME', '').strip()
     if not session_name:
@@ -58,7 +62,7 @@ def load_config() -> Config:
 
     return Config(
         bot_token=bot_token,
-        admin_id=admin_id,
+        admin_ids=tuple(ADMIN_IDS),
         api_id=int(api_id),
         api_hash=str(api_hash),
         session_name=session_name,
