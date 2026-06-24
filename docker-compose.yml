@@ -1,0 +1,14 @@
+services:
+  userbot:
+    build: .
+    container_name: telegram-userbot-parser
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./exports:/app/exports
+      - ./Данные аккаунта Казахстан:/app/Данные аккаунта Казахстан
+      - ./Прокси.txt:/app/Прокси.txt:ro
+      - ./userbot.session:/app/userbot.session
+    command: ["python", "main.py"]

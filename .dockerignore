@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.env
+data/
+data1/
+exports/
+exports_test/
+*.session
+*.session-journal
+nohup.out
+test.py
