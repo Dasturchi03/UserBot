@@ -21,7 +21,7 @@ ACCOUNT_DIR=Данные аккаунта Казахстан по умолчан
 
     Поддерживаемые форматы:
 
-    socks5://user:pass@host:port
+    http://user:pass@host:port
     host:port
     host:port:user:pass
 

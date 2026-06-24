@@ -135,10 +135,12 @@ def _load_proxy() -> dict[str, Any]:
 
 def _parse_proxy(raw: str) -> dict[str, Any]:
     raw = raw.strip()
+    if '://' not in raw and '@' in raw:
+        return _parse_proxy(f'http://{raw}')
     if '://' in raw:
         parsed = urlparse(raw)
         if not parsed.scheme or not parsed.hostname:
-            raise ProxyConfigError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
+            raise ProxyConfigError('Неверный формат прокси. Используйте http://user:pass@host:port или host:port:user:pass.')
         port = _parse_url_proxy_port(parsed)
         return {
             'scheme': parsed.scheme,
