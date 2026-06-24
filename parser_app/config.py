@@ -153,19 +153,19 @@ def _parse_proxy(raw: str) -> dict[str, Any]:
         host, port = parts
         if not host:
             raise ProxyConfigError('Неверный формат прокси. Используйте host:port или host:port:user:pass.')
-        return {'scheme': 'socks5', 'hostname': host, 'port': _parse_proxy_port(port)}
+        return {'scheme': 'http', 'hostname': host, 'port': _parse_proxy_port(port)}
     if len(parts) == 4:
         host, port, username, password = parts
         if not host:
             raise ProxyConfigError('Неверный формат прокси. Используйте host:port:user:pass.')
         return {
-            'scheme': 'socks5',
+            'scheme': 'http',
             'hostname': host,
             'port': _parse_proxy_port(port),
             'username': username,
             'password': password,
         }
-    raise ProxyConfigError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
+    raise ProxyConfigError('Неверный формат прокси. Используйте http://user:pass@host:port или host:port:user:pass.')
 
 
 def _parse_proxy_port(value: str) -> int:
