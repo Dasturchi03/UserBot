@@ -11,3 +11,5 @@ data1/
 test.py
 
 *.session
+
+proxy.txt
