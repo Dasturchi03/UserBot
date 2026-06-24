@@ -9,3 +9,5 @@ venv/
 nohup.out
 data1/
 test.py
+
+*.session
