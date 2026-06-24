@@ -8,3 +8,4 @@ exports_test/
 venv/
 nohup.out
 data1/
+test.py
