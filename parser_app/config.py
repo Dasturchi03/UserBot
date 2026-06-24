@@ -141,11 +141,11 @@ def _load_proxy() -> dict[str, Any]:
 def _parse_proxy(raw: str) -> dict[str, Any]:
     raw = raw.strip()
     if '://' not in raw and '@' in raw:
-        return _parse_proxy(f'http://{raw}')
+        return _parse_proxy(f'socks5://{raw}')
     if '://' in raw:
         parsed = urlparse(raw)
         if not parsed.scheme or not parsed.hostname:
-            raise ProxyConfigError('Неверный формат прокси. Используйте http://user:pass@host:port или host:port:user:pass.')
+            raise ProxyConfigError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
         port = _parse_url_proxy_port(parsed)
         return {
             'scheme': parsed.scheme,
@@ -160,19 +160,19 @@ def _parse_proxy(raw: str) -> dict[str, Any]:
         host, port = parts
         if not host:
             raise ProxyConfigError('Неверный формат прокси. Используйте host:port или host:port:user:pass.')
-        return {'scheme': 'http', 'hostname': host, 'port': _parse_proxy_port(port)}
+        return {'scheme': 'socks5', 'hostname': host, 'port': _parse_proxy_port(port)}
     if len(parts) == 4:
         host, port, username, password = parts
         if not host:
             raise ProxyConfigError('Неверный формат прокси. Используйте host:port:user:pass.')
         return {
-            'scheme': 'http',
+            'scheme': 'socks5',
             'hostname': host,
             'port': _parse_proxy_port(port),
             'username': username,
             'password': password,
         }
-    raise ProxyConfigError('Неверный формат прокси. Используйте http://user:pass@host:port или host:port:user:pass.')
+    raise ProxyConfigError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
 
 
 def _parse_proxy_port(value: str) -> int:
