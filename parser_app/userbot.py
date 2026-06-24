@@ -20,6 +20,10 @@ GROUP_TYPES = {ChatType.GROUP, ChatType.SUPERGROUP}
 ADMIN_STATUSES = {ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR}
 
 
+class ProxyUnavailableError(RuntimeError):
+    pass
+
+
 class UserbotParser:
     def __init__(self, config: Config, db: Database) -> None:
         self.config = config
@@ -36,26 +40,39 @@ class UserbotParser:
         self.last_status = 'Ожидание'
 
     async def start(self) -> None:
-        await self.client.start()
-        me = await self.client.get_me()
+        try:
+            await self.client.start()
+            me = await self.client.get_me()
+        except Exception as error:
+            if _looks_like_proxy_error(error):
+                raise self._proxy_error(error) from error
+            raise
         self.last_status = f'Юзербот подключен как {me.id}'
         log.info(self.last_status)
 
     async def stop(self) -> None:
-        await self.client.stop()
+        try:
+            await self.client.stop()
+        except Exception:
+            log.debug('Юзербот уже остановлен или не был подключен.', exc_info=True)
 
     async def import_account_groups(self) -> int:
         count = 0
-        async for dialog in self.client.get_dialogs():
-            chat = dialog.chat
-            if chat.type in GROUP_TYPES:
-                await self.db.upsert_donor(
-                    chat_id=chat.id,
-                    title=chat.title,
-                    username=chat.username,
-                    status='active',
-                )
-                count += 1
+        try:
+            async for dialog in self.client.get_dialogs():
+                chat = dialog.chat
+                if chat.type in GROUP_TYPES:
+                    await self.db.upsert_donor(
+                        chat_id=chat.id,
+                        title=chat.title,
+                        username=chat.username,
+                        status='active',
+                    )
+                    count += 1
+        except Exception as error:
+            if _looks_like_proxy_error(error):
+                raise self._proxy_error(error) from error
+            raise
         return count
 
     async def add_donor_by_link(self, link: str) -> str:
@@ -70,6 +87,10 @@ class UserbotParser:
         except FloodWait as e:
             await asyncio.sleep(e.value)
             return await self.add_donor_by_link(target)
+        except Exception as error:
+            if _looks_like_proxy_error(error):
+                raise self._proxy_error(error) from error
+            raise
 
         if chat.type not in GROUP_TYPES:
             raise ValueError('Эта ссылка не относится к группе или супергруппе Telegram.')
@@ -95,6 +116,8 @@ class UserbotParser:
                     result = await self.parse_donor(donor, cutoff, depth_days)
                     total_new += result['saved']
                     parsed_chats += 1
+                except ProxyUnavailableError:
+                    raise
                 except Exception:
                     log.exception('Ошибка парсинга донора: %s', donor['chat_id'])
                 if index < len(donors) - 1:
@@ -111,36 +134,43 @@ class UserbotParser:
         max_seen_id = last_message_id
         seen_since_delay = 0
 
-        async for message in self.client.get_chat_history(chat_id=chat_id):
-            seen_since_delay += 1
-            if seen_since_delay >= 100:
-                await self._sleep_between_requests()
-                seen_since_delay = 0
+        try:
+            async for message in self.client.get_chat_history(chat_id=chat_id):
+                seen_since_delay += 1
+                if seen_since_delay >= 100:
+                    await self._sleep_between_requests()
+                    seen_since_delay = 0
 
-            if use_min_id and message.id <= last_message_id:
-                break
-            if message.id > max_seen_id:
-                max_seen_id = message.id
+                if use_min_id and message.id <= last_message_id:
+                    break
+                if message.id > max_seen_id:
+                    max_seen_id = message.id
 
-            message_date = _as_utc(message.date)
-            if message_date < cutoff:
-                break
+                message_date = _as_utc(message.date)
+                if message_date < cutoff:
+                    break
 
-            sender = message.from_user
-            if not sender or sender.is_bot:
-                continue
-            if await self._is_admin(chat_id, sender.id):
-                continue
+                sender = message.from_user
+                if not sender or sender.is_bot:
+                    continue
+                if await self._is_admin(chat_id, sender.id):
+                    continue
 
-            changed = await self.db.upsert_user(
-                user_id=sender.id,
-                username=sender.username,
-                first_name=sender.first_name,
-                last_activity_date=message_date.isoformat(),
-                source_chat_id=chat_id,
-            )
-            if changed:
-                saved += 1
+                changed = await self.db.upsert_user(
+                    user_id=sender.id,
+                    username=sender.username,
+                    first_name=sender.first_name,
+                    last_activity_date=message_date.isoformat(),
+                    source_chat_id=chat_id,
+                )
+                if changed:
+                    saved += 1
+        except ProxyUnavailableError:
+            raise
+        except Exception as error:
+            if _looks_like_proxy_error(error):
+                raise self._proxy_error(error) from error
+            raise
 
         if max_seen_id:
             await self.db.update_donor_progress(chat_id, max_seen_id)
@@ -156,7 +186,9 @@ class UserbotParser:
         except FloodWait as e:
             await asyncio.sleep(e.value)
             return await self._is_admin(chat_id, user_id)
-        except Exception:
+        except Exception as error:
+            if _looks_like_proxy_error(error):
+                raise self._proxy_error(error) from error
             is_admin = False
         self._admin_cache[key] = is_admin
         return is_admin
@@ -164,9 +196,39 @@ class UserbotParser:
     async def _sleep_between_requests(self) -> None:
         await asyncio.sleep(random.randint(*self.config.request_delay))
 
+    def _proxy_error(self, error: Exception) -> ProxyUnavailableError:
+        self.last_status = f'Прокси не работает: {error}'
+        log.exception('Прокси недоступен или не дает подключиться к Telegram.')
+        return ProxyUnavailableError(self.last_status)
+
 
 def _looks_like_invite(value: str) -> bool:
     return 't.me/+' in value or 'joinchat/' in value
+
+
+def _looks_like_proxy_error(error: BaseException) -> bool:
+    proxy_markers = (
+        'proxy',
+        'socks',
+        'connection',
+        'connect',
+        'network',
+        'socket',
+        'timeout',
+        'timed out',
+        'connection refused',
+        'host unreachable',
+        'no route',
+    )
+    current: BaseException | None = error
+    while current:
+        if isinstance(current, (OSError, ConnectionError, TimeoutError, EOFError)):
+            return True
+        text = f'{current.__class__.__name__}: {current}'.lower()
+        if any(marker in text for marker in proxy_markers):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _as_utc(value: datetime) -> datetime:

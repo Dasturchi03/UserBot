@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import sys
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -14,7 +16,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from parser_app.config import Config
 from parser_app.db import Database
 from parser_app.exporter import export_users
-from parser_app.userbot import UserbotParser
+from parser_app.userbot import ProxyUnavailableError, UserbotParser
+
+log = logging.getLogger(__name__)
 
 
 class AdminState(StatesGroup):
@@ -36,6 +40,9 @@ class AdminPanel:
 
     async def run(self) -> None:
         await self.dp.start_polling(self.bot)
+
+    async def close(self) -> None:
+        await self.bot.session.close()
 
     def _register(self) -> None:
         self.router.message.filter(F.from_user.id == self.config.admin_id)
@@ -160,7 +167,11 @@ class AdminPanel:
 
     async def import_groups(self, callback: CallbackQuery) -> None:
         await callback.answer('Импорт запущен.')
-        count = await self.parser.import_account_groups()
+        try:
+            count = await self.parser.import_account_groups()
+        except ProxyUnavailableError as error:
+            await self.notify_proxy_error(error)
+            return
         await callback.message.answer(f'Из диалогов аккаунта импортировано групп-доноров: {count}.')
 
     async def parse_now(self, callback: CallbackQuery) -> None:
@@ -168,8 +179,35 @@ class AdminPanel:
         asyncio.create_task(self._run_parse_and_report(callback.message.chat.id))
 
     async def _run_parse_and_report(self, chat_id: int) -> None:
-        result = await self.parser.parse_all_donors()
+        try:
+            result = await self.parser.parse_all_donors()
+        except ProxyUnavailableError as error:
+            await self.notify_proxy_error(error)
+            return
         await self.bot.send_message(chat_id, f'Парсинг завершен: {result}')
+
+    async def run_scheduled_parse(self) -> None:
+        try:
+            result = await self.parser.parse_all_donors()
+        except ProxyUnavailableError as error:
+            await self.notify_proxy_error(error)
+            return
+        await self.bot.send_message(self.config.admin_id, f'Автопарсинг завершен: {result}')
+
+    async def notify_proxy_error(self, error: BaseException) -> None:
+        message = (
+            'Прокси не работает или Telegram не подключается через него. '
+            f'Юзербот остановил работу. Ошибка: {error}'
+        )
+        log.error(message)
+        print(message, file=sys.stderr)
+        await self.parser.stop()
+        await self.bot.send_message(
+            self.config.admin_id,
+            'Прокси не работает или Telegram не подключается через него.\n'
+            'Юзербот остановил работу. Проверьте PROXY/Прокси.txt и перезапустите проект.\n\n'
+            f'Ошибка: {error}',
+        )
 
     async def export_new(self, callback: CallbackQuery) -> None:
         await self._send_export(callback, only_new=True)

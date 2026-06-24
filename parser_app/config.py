@@ -17,7 +17,7 @@ class Config:
     api_id: int
     api_hash: str
     session_name: str
-    proxy: dict[str, Any] | None
+    proxy: dict[str, Any]
     db_path: Path
     export_dir: Path
     log_level: str
@@ -26,6 +26,10 @@ class Config:
     chat_delay: tuple[int, int]
     join_delay_seconds: int
     timezone: str
+
+
+class ProxyConfigError(RuntimeError):
+    pass
 
 
 def load_config() -> Config:
@@ -119,13 +123,13 @@ def _parse_time(value: str) -> tuple[int, int]:
     return int(hour), int(minute)
 
 
-def _load_proxy() -> dict[str, Any] | None:
+def _load_proxy() -> dict[str, Any]:
     raw = os.getenv('PROXY', '').strip()
     proxy_file = Path(os.getenv('PROXY_FILE', 'Прокси.txt'))
     if not raw and proxy_file.exists():
         raw = proxy_file.read_text(encoding='utf-8').strip()
     if not raw:
-        return None
+        raise ProxyConfigError('Прокси обязателен. Укажите PROXY в .env или заполните Прокси.txt.')
     return _parse_proxy(raw)
 
 
@@ -133,10 +137,13 @@ def _parse_proxy(raw: str) -> dict[str, Any]:
     raw = raw.strip()
     if '://' in raw:
         parsed = urlparse(raw)
+        if not parsed.scheme or not parsed.hostname:
+            raise ProxyConfigError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
+        port = _parse_url_proxy_port(parsed)
         return {
             'scheme': parsed.scheme,
             'hostname': parsed.hostname,
-            'port': parsed.port,
+            'port': port,
             'username': parsed.username,
             'password': parsed.password,
         }
@@ -144,14 +151,36 @@ def _parse_proxy(raw: str) -> dict[str, Any]:
     parts = raw.split(':')
     if len(parts) == 2:
         host, port = parts
-        return {'scheme': 'socks5', 'hostname': host, 'port': int(port)}
+        if not host:
+            raise ProxyConfigError('Неверный формат прокси. Используйте host:port или host:port:user:pass.')
+        return {'scheme': 'socks5', 'hostname': host, 'port': _parse_proxy_port(port)}
     if len(parts) == 4:
         host, port, username, password = parts
+        if not host:
+            raise ProxyConfigError('Неверный формат прокси. Используйте host:port:user:pass.')
         return {
             'scheme': 'socks5',
             'hostname': host,
-            'port': int(port),
+            'port': _parse_proxy_port(port),
             'username': username,
             'password': password,
         }
-    raise RuntimeError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
+    raise ProxyConfigError('Неверный формат прокси. Используйте socks5://user:pass@host:port или host:port:user:pass.')
+
+
+def _parse_proxy_port(value: str) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as error:
+        raise ProxyConfigError('Порт прокси должен быть числом.') from error
+    if port <= 0:
+        raise ProxyConfigError('Порт прокси должен быть положительным числом.')
+    return port
+
+
+def _parse_url_proxy_port(parsed: Any) -> int:
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ProxyConfigError('Порт прокси должен быть числом.') from error
+    return _parse_proxy_port(str(port) if port else '')
