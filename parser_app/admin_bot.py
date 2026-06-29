@@ -18,7 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from parser_app.config import Config
 from parser_app.db import Database
 from parser_app.exporter import export_users
-from parser_app.userbot import ProxyUnavailableError, UserbotParser
+from parser_app.userbot import ProxyUnavailableError, UserbotParser, UserbotSessionError
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +143,9 @@ class AdminPanel:
     async def add_donor(self, message: Message, state: FSMContext) -> None:
         try:
             result = await self.parser.add_donor_by_link(message.text.strip())
+        except UserbotSessionError as error:
+            await self.notify_session_error(error)
+            return
         except Exception as e:
             await message.answer(f'Донор не добавлен: {e}')
             return
@@ -177,6 +180,9 @@ class AdminPanel:
         except ProxyUnavailableError as error:
             await self.notify_proxy_error(error)
             return
+        except UserbotSessionError as error:
+            await self.notify_session_error(error)
+            return
         await callback.message.answer(f'Из диалогов аккаунта импортировано групп-доноров: {count}.')
 
     async def parse_now(self, callback: CallbackQuery) -> None:
@@ -189,6 +195,9 @@ class AdminPanel:
         except ProxyUnavailableError as error:
             await self.notify_proxy_error(error)
             return
+        except UserbotSessionError as error:
+            await self.notify_session_error(error)
+            return
         await self.bot.send_message(chat_id, f'Парсинг завершен: {result}')
 
     async def run_scheduled_parse(self) -> None:
@@ -196,6 +205,9 @@ class AdminPanel:
             result = await self.parser.parse_all_donors()
         except ProxyUnavailableError as error:
             await self.notify_proxy_error(error)
+            return
+        except UserbotSessionError as error:
+            await self.notify_session_error(error)
             return
         await self.send_to_admins(f'Автопарсинг завершен: {result}')
 
@@ -210,6 +222,17 @@ class AdminPanel:
         await self.send_to_admins(
             'Прокси не работает или Telegram не подключается через него.\n'
             'Юзербот остановил работу. Проверьте PROXY/Прокси.txt и перезапустите проект.\n\n'
+            f'Ошибка: {error}',
+        )
+
+    async def notify_session_error(self, error: BaseException) -> None:
+        message = f'Session файл недействителен. Нужно загрузить новый .session. Ошибка: {error}'
+        log.error(message)
+        print(message, file=sys.stderr)
+        await self.parser.stop()
+        await self.send_to_admins(
+            'Session файл юзербота недействителен или был отозван Telegram.\n'
+            'Aiogram-бот продолжает работать. Нажмите "Заменить session" и загрузите новый .session файл.\n\n'
             f'Ошибка: {error}',
         )
 

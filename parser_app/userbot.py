@@ -27,6 +27,10 @@ class ProxyUnavailableError(RuntimeError):
     pass
 
 
+class UserbotSessionError(RuntimeError):
+    pass
+
+
 class UserbotParser:
     def __init__(self, config: Config, db: Database) -> None:
         self.config = config
@@ -34,6 +38,7 @@ class UserbotParser:
         self.client = self._create_client()
         self._admin_cache: dict[tuple[int, int], bool] = {}
         self._parse_lock = asyncio.Lock()
+        self._started = False
         self.last_status = 'Ожидание'
 
     def _create_client(self) -> Client:
@@ -52,7 +57,10 @@ class UserbotParser:
         except Exception as error:
             if _looks_like_proxy_error(error):
                 raise self._proxy_error(error) from error
+            if _looks_like_session_error(error):
+                raise self._session_error(error) from error
             raise
+        self._started = True
         self.last_status = f'Юзербот подключен как {me.id}'
         log.info(self.last_status)
 
@@ -61,6 +69,8 @@ class UserbotParser:
             await self.client.stop()
         except Exception:
             log.debug('Юзербот уже остановлен или не был подключен.', exc_info=True)
+        finally:
+            self._started = False
 
     async def replace_session(self, uploaded_session_path: Path) -> str:
         if self._parse_lock.locked():
@@ -78,6 +88,7 @@ class UserbotParser:
             return str(session_path)
 
     async def import_account_groups(self) -> int:
+        self._ensure_started()
         count = 0
         try:
             async for dialog in self.client.get_dialogs():
@@ -93,10 +104,13 @@ class UserbotParser:
         except Exception as error:
             if _looks_like_proxy_error(error):
                 raise self._proxy_error(error) from error
+            if _looks_like_session_error(error):
+                raise self._session_error(error) from error
             raise
         return count
 
     async def add_donor_by_link(self, link: str) -> str:
+        self._ensure_started()
         target = link.strip()
         if not target:
             raise ValueError('Ссылка на донора пустая.')
@@ -112,6 +126,8 @@ class UserbotParser:
         except Exception as error:
             if _looks_like_proxy_error(error):
                 raise self._proxy_error(error) from error
+            if _looks_like_session_error(error):
+                raise self._session_error(error) from error
             raise
 
         if chat.type not in GROUP_TYPES:
@@ -122,6 +138,7 @@ class UserbotParser:
         return f'Донор добавлен: {chat.title or chat.id}'
 
     async def parse_all_donors(self) -> dict[str, Any]:
+        self._ensure_started()
         if self._parse_lock.locked():
             return {'status': 'busy', 'message': 'Парсинг уже выполняется.'}
 
@@ -139,6 +156,8 @@ class UserbotParser:
                     total_new += result['saved']
                     parsed_chats += 1
                 except ProxyUnavailableError:
+                    raise
+                except UserbotSessionError:
                     raise
                 except Exception:
                     log.exception('Ошибка парсинга донора: %s', donor['chat_id'])
@@ -189,9 +208,13 @@ class UserbotParser:
                     saved += 1
         except ProxyUnavailableError:
             raise
+        except UserbotSessionError:
+            raise
         except Exception as error:
             if _looks_like_proxy_error(error):
                 raise self._proxy_error(error) from error
+            if _looks_like_session_error(error):
+                raise self._session_error(error) from error
             raise
 
         if max_seen_id:
@@ -211,6 +234,8 @@ class UserbotParser:
         except Exception as error:
             if _looks_like_proxy_error(error):
                 raise self._proxy_error(error) from error
+            if _looks_like_session_error(error):
+                raise self._session_error(error) from error
             is_admin = False
         self._admin_cache[key] = is_admin
         return is_admin
@@ -222,6 +247,17 @@ class UserbotParser:
         self.last_status = f'Прокси не работает: {error}'
         log.exception('Прокси недоступен или не дает подключиться к Telegram.')
         return ProxyUnavailableError(self.last_status)
+
+    def _session_error(self, error: Exception) -> UserbotSessionError:
+        self._started = False
+        self.last_status = f'Session недействителен: {error}'
+        log.exception('Session файл недействителен или был отозван Telegram.')
+        return UserbotSessionError(self.last_status)
+
+    def _ensure_started(self) -> None:
+        if not self._started:
+            self.last_status = 'Юзербот не подключен. Нужно загрузить новый .session файл.'
+            raise UserbotSessionError(self.last_status)
 
 
 def _looks_like_invite(value: str) -> bool:
@@ -281,6 +317,26 @@ def _looks_like_proxy_error(error: BaseException) -> bool:
             return True
         text = f'{current.__class__.__name__}: {current}'.lower()
         if any(marker in text for marker in proxy_markers):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _looks_like_session_error(error: BaseException) -> bool:
+    session_markers = (
+        'session_revoked',
+        'session expired',
+        'session password needed',
+        'auth_key_unregistered',
+        'auth_key_duplicated',
+        'user_deactivated',
+        'unauthorized',
+        '401',
+    )
+    current: BaseException | None = error
+    while current:
+        text = f'{current.__class__.__name__}: {current}'.lower()
+        if any(marker in text for marker in session_markers):
             return True
         current = current.__cause__ or current.__context__
     return False

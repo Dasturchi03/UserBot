@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from parser_app.admin_bot import AdminPanel
 from parser_app.config import ADMIN_IDS, ProxyConfigError, load_config
 from parser_app.db import Database
-from parser_app.userbot import ProxyUnavailableError, UserbotParser
+from parser_app.userbot import ProxyUnavailableError, UserbotParser, UserbotSessionError
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,9 @@ async def main() -> None:
             await admin.close()
             await db.close()
         raise SystemExit(1) from error
+    except UserbotSessionError as error:
+        _report_error('Юзербот не запущен из-за недействительного session файла.', error)
+        await admin.notify_session_error(error)
 
     scheduler = AsyncIOScheduler(timezone=config.timezone)
     hour, minute = config.auto_parse_time
@@ -79,6 +82,10 @@ async def _notify_admin_from_env(error: BaseException) -> None:
 
 
 def _report_proxy_error(message: str, error: BaseException) -> None:
+    _report_error(message, error)
+
+
+def _report_error(message: str, error: BaseException) -> None:
     full_message = f'{message} Ошибка: {error}'
     log.error(full_message)
     print(full_message, file=sys.stderr)
