@@ -68,6 +68,8 @@ class AdminPanel:
         self.router.callback_query(F.data == 'export_all')(self.export_all)
         self.router.callback_query(F.data == 'session_upload')(self.ask_session_upload)
         self.router.message(AdminState.waiting_session)(self.replace_session)
+        self.router.callback_query(F.data == 'clear_data')(self.ask_clear_data)
+        self.router.callback_query(F.data == 'clear_data_confirm')(self.clear_data)
         self.router.callback_query(F.data == 'status')(self.status)
 
     async def start(self, message: Message) -> None:
@@ -258,7 +260,7 @@ class AdminPanel:
         await state.set_state(AdminState.waiting_session)
         await callback.message.answer(
             'Отправьте новый .session файл.\n\n'
-            'После успешной замены будут удалены доноры, собранные пользователи и Excel-отчеты.'
+            'Доноры, собранные пользователи и Excel-отчеты при замене session не удаляются.'
         )
         await callback.answer()
 
@@ -276,8 +278,6 @@ class AdminPanel:
         try:
             await self.bot.download(message.document, destination=temp_path)
             replaced_path = await self.parser.replace_session(temp_path)
-            await self.db.reset_collected_data()
-            _clear_exports(self.config.export_dir)
         except Exception as error:
             log.exception('Не удалось заменить session файл.')
             await message.answer(f'Session не заменен: {error}', reply_markup=await self._main_keyboard())
@@ -291,10 +291,30 @@ class AdminPanel:
         await state.clear()
         await message.answer(
             'Session файл заменен.\n'
-            f'Активный файл: {replaced_path}\n'
+            f'Активный файл: {replaced_path}',
+            reply_markup=await self._main_keyboard(),
+        )
+
+    async def ask_clear_data(self, callback: CallbackQuery) -> None:
+        kb = InlineKeyboardBuilder()
+        kb.button(text='Да, очистить', callback_data='clear_data_confirm')
+        kb.button(text='Назад', callback_data='menu')
+        kb.adjust(1)
+        await callback.message.edit_text(
+            'Очистить доноров, собранных пользователей и Excel-отчеты?\n\n'
+            'Session файл останется без изменений.',
+            reply_markup=kb.as_markup(),
+        )
+        await callback.answer()
+
+    async def clear_data(self, callback: CallbackQuery) -> None:
+        await self.db.reset_collected_data()
+        _clear_exports(self.config.export_dir)
+        await callback.message.edit_text(
             'Доноры, пользователи и Excel-отчеты очищены.',
             reply_markup=await self._main_keyboard(),
         )
+        await callback.answer()
 
     async def status(self, callback: CallbackQuery) -> None:
         try:
@@ -326,8 +346,9 @@ class AdminPanel:
         kb.button(text='Выгрузить новых', callback_data='export_new')
         kb.button(text='Выгрузить всех', callback_data='export_all')
         kb.button(text='Заменить session', callback_data='session_upload')
+        kb.button(text='Очистить данные', callback_data='clear_data')
         kb.button(text='Статус', callback_data='status')
-        kb.adjust(2, 1, 1, 1, 1, 1)
+        kb.adjust(2, 1, 1, 1, 1, 1, 1)
         return kb.as_markup()
 
     @staticmethod
