@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -25,6 +27,7 @@ class AdminState(StatesGroup):
     waiting_depth = State()
     waiting_donor = State()
     waiting_remove = State()
+    waiting_session = State()
 
 
 class AdminPanel:
@@ -63,6 +66,8 @@ class AdminPanel:
         self.router.callback_query(F.data == 'parse_now')(self.parse_now)
         self.router.callback_query(F.data == 'export_new')(self.export_new)
         self.router.callback_query(F.data == 'export_all')(self.export_all)
+        self.router.callback_query(F.data == 'session_upload')(self.ask_session_upload)
+        self.router.message(AdminState.waiting_session)(self.replace_session)
         self.router.callback_query(F.data == 'status')(self.status)
 
     async def start(self, message: Message) -> None:
@@ -226,6 +231,48 @@ class AdminPanel:
         path = await export_users(self.db, self.config.export_dir, only_new=only_new)
         await callback.message.answer_document(FSInputFile(Path(path)))
 
+    async def ask_session_upload(self, callback: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(AdminState.waiting_session)
+        await callback.message.answer(
+            'Отправьте новый .session файл.\n\n'
+            'После успешной замены будут удалены доноры, собранные пользователи и Excel-отчеты.'
+        )
+        await callback.answer()
+
+    async def replace_session(self, message: Message, state: FSMContext) -> None:
+        if not message.document:
+            await message.answer('Отправьте файл с расширением .session.')
+            return
+
+        filename = message.document.file_name or ''
+        if not filename.endswith('.session'):
+            await message.answer('Нужен именно .session файл.')
+            return
+
+        temp_path = Path(tempfile.gettempdir()) / f'uploaded_{message.from_user.id}_{message.document.file_unique_id}.session'
+        try:
+            await self.bot.download(message.document, destination=temp_path)
+            replaced_path = await self.parser.replace_session(temp_path)
+            await self.db.reset_collected_data()
+            _clear_exports(self.config.export_dir)
+        except Exception as error:
+            log.exception('Не удалось заменить session файл.')
+            await message.answer(f'Session не заменен: {error}', reply_markup=await self._main_keyboard())
+            return
+        finally:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+        await state.clear()
+        await message.answer(
+            'Session файл заменен.\n'
+            f'Активный файл: {replaced_path}\n'
+            'Доноры, пользователи и Excel-отчеты очищены.',
+            reply_markup=await self._main_keyboard(),
+        )
+
     async def status(self, callback: CallbackQuery) -> None:
         try:
             await callback.message.edit_text(await self._dashboard_text(), reply_markup=await self._main_keyboard())
@@ -255,8 +302,9 @@ class AdminPanel:
         kb.button(text='Запустить парсинг', callback_data='parse_now')
         kb.button(text='Выгрузить новых', callback_data='export_new')
         kb.button(text='Выгрузить всех', callback_data='export_all')
+        kb.button(text='Заменить session', callback_data='session_upload')
         kb.button(text='Статус', callback_data='status')
-        kb.adjust(2, 1, 1, 1, 1)
+        kb.adjust(2, 1, 1, 1, 1, 1)
         return kb.as_markup()
 
     @staticmethod
@@ -265,3 +313,13 @@ class AdminPanel:
             'active': 'активен',
             'pending_approval': 'ожидает одобрения',
         }.get(status, status)
+
+
+def _clear_exports(export_dir: Path) -> None:
+    if not export_dir.exists():
+        return
+    for path in export_dir.iterdir():
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()

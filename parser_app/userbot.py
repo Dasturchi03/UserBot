@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import shutil
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -29,16 +31,19 @@ class UserbotParser:
     def __init__(self, config: Config, db: Database) -> None:
         self.config = config
         self.db = db
-        self.client = Client(
-            name=config.session_name,
-            api_id=config.api_id,
-            api_hash=config.api_hash,
-            proxy=config.proxy,
-            workdir='.',
-        )
+        self.client = self._create_client()
         self._admin_cache: dict[tuple[int, int], bool] = {}
         self._parse_lock = asyncio.Lock()
         self.last_status = 'Ожидание'
+
+    def _create_client(self) -> Client:
+        return Client(
+            name=self.config.session_name,
+            api_id=self.config.api_id,
+            api_hash=self.config.api_hash,
+            proxy=self.config.proxy,
+            workdir='.',
+        )
 
     async def start(self) -> None:
         try:
@@ -56,6 +61,21 @@ class UserbotParser:
             await self.client.stop()
         except Exception:
             log.debug('Юзербот уже остановлен или не был подключен.', exc_info=True)
+
+    async def replace_session(self, uploaded_session_path: Path) -> str:
+        if self._parse_lock.locked():
+            raise RuntimeError('Сейчас идет парсинг. Дождитесь завершения и загрузите session еще раз.')
+
+        async with self._parse_lock:
+            await self.stop()
+            session_path = _session_file_path(self.config.session_name)
+            session_path.parent.mkdir(parents=True, exist_ok=True)
+            _remove_session_files(session_path)
+            shutil.move(str(uploaded_session_path), session_path)
+            self.client = self._create_client()
+            self._admin_cache.clear()
+            await self.start()
+            return str(session_path)
 
     async def import_account_groups(self) -> int:
         count = 0
@@ -224,6 +244,21 @@ def _normalize_chat_ref(value: str) -> str:
         if username:
             return f'@{username}'
     return target
+
+
+def _session_file_path(session_name: str) -> Path:
+    path = Path(session_name)
+    if path.suffix == '.session':
+        return path
+    return path.with_suffix('.session')
+
+
+def _remove_session_files(session_path: Path) -> None:
+    for path in (session_path, Path(f'{session_path}-journal')):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _looks_like_proxy_error(error: BaseException) -> bool:

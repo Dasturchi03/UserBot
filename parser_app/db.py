@@ -191,3 +191,11 @@ class Database:
             return
         placeholders = ",".join("?" for _ in user_ids)
         await self.execute(f"UPDATE users SET status = 'Exported' WHERE user_id IN ({placeholders})", user_ids)
+
+    async def reset_collected_data(self) -> None:
+        await self.executescript(
+            """
+            DELETE FROM users;
+            DELETE FROM donors;
+            """
+        )
