@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
     volumes:
       - ./data:/app/data
       - ./exports:/app/exports
