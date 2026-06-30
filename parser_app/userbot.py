@@ -80,8 +80,7 @@ class UserbotParser:
             await self.stop()
             session_path = _session_file_path(self.config.session_name)
             session_path.parent.mkdir(parents=True, exist_ok=True)
-            _remove_session_files(session_path)
-            shutil.move(str(uploaded_session_path), session_path)
+            _replace_session_file(uploaded_session_path, session_path)
             self.client = self._create_client()
             self._admin_cache.clear()
             await self.start()
@@ -289,12 +288,31 @@ def _session_file_path(session_name: str) -> Path:
     return path.with_suffix('.session')
 
 
+def _replace_session_file(source_path: Path, session_path: Path) -> None:
+    journal_path = Path(f'{session_path}-journal')
+    try:
+        journal_path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        log.warning('Не удалось удалить journal файл session: %s', journal_path, exc_info=True)
+
+    if session_path.exists():
+        with source_path.open('rb') as source, session_path.open('wb') as target:
+            shutil.copyfileobj(source, target)
+        return
+
+    shutil.move(str(source_path), session_path)
+
+
 def _remove_session_files(session_path: Path) -> None:
-    for path in (session_path, Path(f'{session_path}-journal')):
+    for path in (Path(f'{session_path}-journal'), session_path):
         try:
             path.unlink()
         except FileNotFoundError:
             pass
+        except OSError:
+            log.warning('Не удалось удалить session файл: %s', path, exc_info=True)
 
 
 def _looks_like_proxy_error(error: BaseException) -> bool:
